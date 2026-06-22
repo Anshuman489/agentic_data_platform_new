@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-data-platform"
+version = "0.1.0"
+description = "Agentic Data Intelligence Platform — V1"
+requires-python = ">=3.11"
+
+dependencies = [
+    # BigQuery client library — used to fetch table schema and run queries
+    "google-cloud-bigquery>=3.11.0",
+
+    # Google authentication — handles Application Default Credentials (ADC)
+    # ADC lets the app authenticate using: gcloud auth application-default login
+    "google-auth>=2.23.0",
+
+    # Pydantic v2 — used for all data models (DatasetProfile, ColumnProfile, etc.)
+    # v2 is significantly faster than v1 and has a cleaner API
+    "pydantic>=2.5.0",
+
+    # pydantic-settings — extends Pydantic to read config from environment variables / .env files
+    "pydantic-settings>=2.1.0",
+
+    # python-dotenv — loads variables from a .env file into the environment at startup
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+# Tells setuptools to automatically discover all Python packages in the project root.
+# A "package" is any directory that contains an __init__.py file.
+where = ["."]

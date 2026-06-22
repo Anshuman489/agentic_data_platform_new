@@ -1,0 +1,34 @@
+# Environment
+.env
+
+# Cache — generated at runtime by schema_discovery_agent.py
+cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter (if used later)
+.ipynb_checkpoints/
+*.ipynb

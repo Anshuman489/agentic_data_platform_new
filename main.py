@@ -19,7 +19,6 @@ from decimal import Decimal
 
 from core.bigquery_client import BigQueryClient
 from agents.schema_discovery_agent import SchemaDiscoveryAgent
-from agents.intent_agent import IntentAgent
 from agents.sql_generation_agent import SqlGenerationAgent
 from agents.validation_agent import ValidationAgent
 from agents.pipeline import run_pipeline
@@ -190,7 +189,6 @@ def main() -> None:
             result = run_pipeline(
                 question=args.ask,
                 profile=profile,
-                intent_agent=IntentAgent(),
                 sql_agent=SqlGenerationAgent(),
                 val_agent=ValidationAgent(bq),
             )

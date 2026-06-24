@@ -22,7 +22,6 @@ from decimal import Decimal
 
 from core.bigquery_client import BigQueryClient
 from agents.schema_discovery_agent import SchemaDiscoveryAgent
-from agents.intent_agent import IntentAgent
 from agents.sql_generation_agent import SqlGenerationAgent
 from agents.validation_agent import ValidationAgent
 from agents.pipeline import run_pipeline
@@ -120,7 +119,6 @@ def main() -> None:
     profile = SchemaDiscoveryAgent(bq).run(args.table)
     print(f"  {len(profile.columns)} columns — {profile.row_count:,} rows")
 
-    intent_agent = IntentAgent()
     sql_agent = SqlGenerationAgent()
     val_agent = ValidationAgent(bq)
 
@@ -130,7 +128,6 @@ def main() -> None:
             result = run_pipeline(
                 question=question,
                 profile=profile,
-                intent_agent=intent_agent,
                 sql_agent=sql_agent,
                 val_agent=val_agent,
             )

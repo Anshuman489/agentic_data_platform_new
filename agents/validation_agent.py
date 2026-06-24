@@ -14,6 +14,7 @@ Layer 2 — Semantic (Gemini reflection):
 If both layers pass, the query is executed and rows are returned.
 """
 
+import concurrent.futures
 import logging
 
 from google import genai
@@ -170,21 +171,29 @@ class ValidationAgent:
             "correct grouping granularity (e.g. per-month vs per-row)."
         )
 
-        response = self._gemini.models.generate_content(
-            model=self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=(
-                    "You are a SQL reviewer for a data analytics platform. "
-                    "Evaluate whether the generated BigQuery SQL correctly answers "
-                    "the user's analytical question. Approve only if the SQL would "
-                    "return exactly what the user asked for. Be concise in feedback."
-                ),
-                response_mime_type="application/json",
-                response_schema=_SemanticCheck,
-                temperature=0.0,
+        config = types.GenerateContentConfig(
+            system_instruction=(
+                "You are a SQL reviewer for a data analytics platform. "
+                "Evaluate whether the generated BigQuery SQL correctly answers "
+                "the user's analytical question. Approve only if the SQL would "
+                "return exactly what the user asked for. Be concise in feedback."
             ),
+            response_mime_type="application/json",
+            response_schema=_SemanticCheck,
+            temperature=0.0,
         )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                self._gemini.models.generate_content,
+                model=self._model,
+                contents=prompt,
+                config=config,
+            )
+            try:
+                response = future.result(timeout=45)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError("Gemini did not respond within 45 seconds — try again or switch to a faster model")
 
         return _SemanticCheck.model_validate_json(response.text)
 

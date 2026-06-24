@@ -22,6 +22,7 @@ from agents.schema_discovery_agent import SchemaDiscoveryAgent
 from agents.intent_agent import IntentAgent
 from agents.sql_generation_agent import SqlGenerationAgent
 from agents.validation_agent import ValidationAgent
+from agents.pipeline import run_pipeline
 from models.dataset import DatasetProfile
 from models.validation import ValidationResult
 
@@ -186,9 +187,13 @@ def main() -> None:
 
     if args.ask:
         try:
-            intent = IntentAgent().run(args.ask, profile)
-            sql = SqlGenerationAgent().run(intent, profile)
-            result = ValidationAgent(bq).run(args.ask, sql, profile)
+            result = run_pipeline(
+                question=args.ask,
+                profile=profile,
+                intent_agent=IntentAgent(),
+                sql_agent=SqlGenerationAgent(),
+                val_agent=ValidationAgent(bq),
+            )
             _print_query_result(args.ask, result)
         except Exception as exc:
             logger.error("Pipeline failed: %s", exc)

@@ -56,14 +56,18 @@ def _dim_sql(dim: Dimension) -> tuple[str, str]:
 
     Returns:
         (sql_expression, alias) — e.g.:
-          plain column → ("`Country`",              "Country")
-          date_trunc   → ("DATE_TRUNC(`InvoiceDate`, MONTH)", "InvoiceDate")
+          plain column → ("`Country`",                              "Country")
+          date_trunc   → ("DATE_TRUNC(`pickup_datetime`, MONTH)",   "pickup_datetime")
+          extract      → ("EXTRACT(HOUR FROM `pickup_datetime`)",   "pickup_hour")
 
-    The alias is always the bare column name so ORDER BY can reference it
-    whether or not the column is wrapped in DATE_TRUNC.
+    For extract, the alias is "{column}_{part}" (e.g. "pickup_hour", "pickup_dow")
+    so the result column has a meaningful name and ORDER BY can reference it.
     """
     if dim.date_trunc:
         return f"DATE_TRUNC(`{dim.column}`, {dim.date_trunc})", dim.column
+    if dim.extract:
+        alias = f"{dim.column}_{dim.extract.lower()}"
+        return f"EXTRACT({dim.extract} FROM `{dim.column}`)", alias
     return f"`{dim.column}`", dim.column
 
 
@@ -187,7 +191,7 @@ class SqlGenerationAgent:
         # DATE_TRUNC dimensions get an alias so ORDER BY can reference them.
         for dim in intent.dimensions:
             expr, alias = _dim_sql(dim)
-            if dim.date_trunc:
+            if dim.date_trunc or dim.extract:
                 exprs.append(f"{expr} AS `{alias}`")
             else:
                 exprs.append(expr)

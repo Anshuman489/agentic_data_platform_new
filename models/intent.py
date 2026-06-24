@@ -63,16 +63,17 @@ class OrderBy(BaseModel):
 
 class Dimension(BaseModel):
     """
-    A GROUP BY column, with an optional date truncation granularity.
+    A GROUP BY column with optional date extraction or truncation.
 
-    When the user asks for data 'per month', 'each quarter', 'by year', etc.,
-    set date_trunc to the matching granularity. The SQL generator will wrap
-    the column in DATE_TRUNC(col, GRANULARITY) automatically.
+    Use date_trunc for calendar-period grouping (per month, per quarter, etc.).
+    Use extract for sub-day or ordinal grouping (hour of day, day of week, etc.).
+    Only one of date_trunc / extract should be set at a time.
 
     Examples:
-      "sales by country"          → Dimension(column="Country")
-      "revenue per month"         → Dimension(column="InvoiceDate", date_trunc="MONTH")
-      "orders per quarter in 2023"→ Dimension(column="OrderDate", date_trunc="QUARTER")
+      "sales by country"            → Dimension(column="Country")
+      "revenue per month"           → Dimension(column="InvoiceDate", date_trunc="MONTH")
+      "trips by hour of day"        → Dimension(column="pickup_datetime", extract="HOUR")
+      "trips by day of week"        → Dimension(column="pickup_datetime", extract="DOW")
     """
 
     column: str = Field(description="Exact column name from the table schema.")
@@ -83,6 +84,21 @@ class Dimension(BaseModel):
             "Set when the user asks for 'per day', 'per week', 'per month', "
             "'per quarter', or 'per year' grouping. Null for non-date dimensions "
             "or when exact date-level grouping is intended."
+        ),
+    )
+    extract: Literal["HOUR", "MINUTE", "DOW", "DOY", "MONTH", "YEAR"] | None = Field(
+        default=None,
+        description=(
+            "Date part to extract from a date/timestamp column using EXTRACT(). "
+            "Use for sub-day or ordinal grouping: "
+            "HOUR = hour of day (0-23), "
+            "MINUTE = minute of hour (0-59), "
+            "DOW = day of week (0=Sunday, 6=Saturday), "
+            "DOY = day of year (1-366), "
+            "MONTH = month number (1-12), "
+            "YEAR = four-digit year. "
+            "Prefer date_trunc for calendar-period grouping (per month, per quarter). "
+            "Use extract when the user asks for 'by hour', 'by day of week', etc."
         ),
     )
 

@@ -25,6 +25,7 @@ from agents.schema_discovery_agent import SchemaDiscoveryAgent
 from agents.intent_agent import IntentAgent
 from agents.sql_generation_agent import SqlGenerationAgent
 from agents.validation_agent import ValidationAgent
+from agents.pipeline import run_pipeline
 from models.validation import ValidationResult
 
 logging.basicConfig(
@@ -50,8 +51,8 @@ def _print_result(i: int, total: int, question: str, result: ValidationResult) -
     print(f"{'=' * width}")
     print(f"\nSQL:\n{result.sql}")
 
-    print(f"\n── Validation ──────────────────────────")
-    syntax_icon = "✓" if result.syntax_valid else "✗"
+    print(f"\nValidation:")
+    syntax_icon = "OK" if result.syntax_valid else "FAIL"
     print(f"  Syntax   [{syntax_icon}]", end="")
     if result.syntax_error:
         print(f"  {result.syntax_error[:100]}")
@@ -59,11 +60,11 @@ def _print_result(i: int, total: int, question: str, result: ValidationResult) -
         print()
 
     if result.semantic_valid is not None:
-        sem_icon = "✓" if result.semantic_valid else "✗"
+        sem_icon = "OK" if result.semantic_valid else "FAIL"
         print(f"  Semantic [{sem_icon}]  {result.semantic_feedback or ''}")
 
     if result.passed and result.rows:
-        print(f"\n── Results ({result.total_rows} rows) ─────────────────────")
+        print(f"\nResults ({result.total_rows} rows):")
         _print_rows(result.rows)
     elif result.passed and result.total_rows == 0:
         print("\n  (query returned 0 rows)")
@@ -126,9 +127,13 @@ def main() -> None:
     passed = 0
     for i, question in enumerate(questions, 1):
         try:
-            intent = intent_agent.run(question, profile)
-            sql = sql_agent.run(intent, profile)
-            result = val_agent.run(question, sql, profile)
+            result = run_pipeline(
+                question=question,
+                profile=profile,
+                intent_agent=intent_agent,
+                sql_agent=sql_agent,
+                val_agent=val_agent,
+            )
             _print_result(i, len(questions), question, result)
             if result.passed:
                 passed += 1

@@ -8,7 +8,7 @@ Authentication is via Application Default Credentials (ADC) — the same credent
 already used for BigQuery. No extra API key is required.
 """
 
-import json
+import concurrent.futures
 import logging
 
 from google import genai
@@ -46,7 +46,12 @@ class IntentAgent:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def run(self, question: str, profile: DatasetProfile) -> IntentResult:
+    def run(
+        self,
+        question: str,
+        profile: DatasetProfile,
+        feedback: str | None = None,
+    ) -> IntentResult:
         """
         Parse a natural-language question against a DatasetProfile.
 
@@ -56,6 +61,9 @@ class IntentAgent:
         Args:
             question: Free-text analytical question about the table.
             profile:  DatasetProfile describing columns, types, and statistics.
+            feedback: Optional semantic feedback from a prior validation attempt.
+                      When provided, Gemini is told what was wrong so it can
+                      generate a corrected IntentResult on retry.
 
         Returns:
             A validated IntentResult instance.
@@ -65,24 +73,34 @@ class IntentAgent:
             pydantic.ValidationError: if the model returns structurally invalid JSON.
         """
         system_prompt = self._build_system_prompt(profile)
+        contents = self._build_contents(question, feedback)
 
         logger.info(
-            "IntentAgent.run: model=%s table=%s question='%s'",
+            "IntentAgent.run: model=%s table=%s question='%s'%s",
             self._model,
             profile.table_ref,
             question[:100],
+            " [retry with feedback]" if feedback else "",
         )
 
-        response = self._client.models.generate_content(
-            model=self._model,
-            contents=question,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                response_schema=IntentResult,
-                temperature=0.0,
-            ),
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=IntentResult,
+            temperature=0.0,
         )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                self._client.models.generate_content,
+                model=self._model,
+                contents=contents,
+                config=config,
+            )
+            try:
+                response = future.result(timeout=45)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError("Gemini did not respond within 45 seconds — try again or switch to a faster model")
 
         raw_json = response.text
         logger.debug("IntentAgent raw response:\n%s", raw_json)
@@ -91,6 +109,23 @@ class IntentAgent:
         return result
 
     # ── Private: prompt construction ───────────────────────────────────────────
+
+    def _build_contents(self, question: str, feedback: str | None) -> str:
+        """
+        Build the user-turn content sent to Gemini.
+
+        On first attempt this is just the question. On retry the semantic
+        feedback from the validator is appended so Gemini knows what to fix.
+        """
+        if not feedback:
+            return question
+        return (
+            f"{question}\n\n"
+            f"IMPORTANT — your previous attempt was rejected by the SQL validator "
+            f"for this reason:\n\n"
+            f"  {feedback}\n\n"
+            f"Generate a corrected IntentResult that fixes this issue."
+        )
 
     def _build_system_prompt(self, profile: DatasetProfile) -> str:
         """Build the system instruction that provides table context to Gemini."""

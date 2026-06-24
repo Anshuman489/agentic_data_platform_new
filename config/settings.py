@@ -42,6 +42,21 @@ class Settings(BaseSettings):
     # Above this value → classified as MEASURE.
     measure_cardinality_threshold: int = 50
 
+    # ── LLM (Vertex AI — Gemini) ──────────────────────────────────────────────
+
+    # Vertex AI region for Gemini calls. "us-central1" is cheapest and has the
+    # broadest model availability. You can also use "us" (multi-region) or
+    # "global" for maximum availability.
+    vertex_location: str = "us-central1"
+
+    # Gemini model ID on Vertex AI.
+    # Recommended defaults (cheapest to most capable):
+    #   gemini-2.0-flash-lite-001   — fastest, lowest cost
+    #   gemini-2.0-flash-001        — balanced (default)
+    #   gemini-2.5-flash            — best quality/cost ratio
+    #   gemini-2.5-pro              — highest capability
+    llm_model: str = "gemini-2.0-flash-001"
+
     # ── Cache ─────────────────────────────────────────────────────────────────
 
     # Where DatasetProfile JSON files are stored on disk.

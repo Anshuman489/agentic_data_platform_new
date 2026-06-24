@@ -16,7 +16,7 @@ class InferredRole(StrEnum):
     heuristics apply to any table.
 
     StrEnum (Python 3.11+) means each value IS a string:
-      InferredRole.DIMENSION == "DIMENSION"  →  True
+    InferredRole.DIMENSION == "DIMENSION"  →  True
     This makes JSON output human-readable without any special serialization config.
     """
 

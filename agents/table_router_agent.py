@@ -34,8 +34,15 @@ _SYSTEM_PROMPT = (
     "  0.4 — partial: some overlap but missing key columns or wrong domain\n"
     "  0.1 — poor: almost no relevant columns\n"
     "  0.0 — none: completely different domain\n\n"
-    "Be discriminating. If two tables both have revenue columns, use domain context "
-    "and sample values to distinguish them — do not score both at 0.9.\n"
+    "Important scoring rules:\n"
+    "- Be tolerant of spelling mistakes and typos in the question. Score based on "
+    "semantic intent, not exact word matching. 'contry', 'cuntry', 'counrty' all "
+    "mean 'country'.\n"
+    "- Be discriminating between tables. If two tables both have revenue columns, "
+    "use the table description, domain context, and sample values to distinguish "
+    "them — do not score both at 0.9.\n"
+    "- A table's description is the strongest signal for domain fit — weight it "
+    "heavily when present.\n"
     "Return a score and one-sentence reasoning for EVERY table."
 )
 

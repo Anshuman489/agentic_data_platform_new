@@ -22,21 +22,41 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = (
     "You are a BigQuery SQL expert. Given a natural language question and a table schema, "
     "write a single valid BigQuery SQL query that correctly answers the question.\n\n"
+    "The question may contain spelling mistakes — interpret them based on semantic intent "
+    "and the available column names in the schema. 'quntity' means 'Quantity', "
+    "'prise' means 'UnitPrice', 'contry' means 'Country', etc.\n\n"
     "Rules:\n"
     "- Use only columns that exist in the schema — never invent column names.\n"
     "- Always backtick-quote column names and the fully-qualified table name.\n"
+    "- Always use a consistent table alias (t) for the main table.\n"
     "- Use standard BigQuery SQL syntax (not legacy SQL).\n"
     "- For date/time grouping use DATE_TRUNC or EXTRACT as appropriate.\n"
     "- For ranking or percentages use window functions when needed.\n"
     "- Add ORDER BY and LIMIT where the question implies them.\n"
     "- Always give every SELECT expression a meaningful alias using AS "
     "(e.g. AVG(order_total) AS avg_order_value, COUNT(*) AS trip_count).\n"
-    "- Return only the sql field — no explanation, no markdown."
+    "- Always use the column alias name in GROUP BY, not a positional index "
+    "(e.g. GROUP BY country, not GROUP BY 1).\n"
+    "- For numeric measure columns (prices, quantities, amounts), always filter out "
+    "zero and negative values in WHERE unless the question explicitly asks about "
+    "returns, refunds, cancellations, or negative balances.\n"
+    "- When listing items that match a filter condition (e.g. 'which products have X'), "
+    "always include COUNT(*) AS occurrence_count (never COUNT(column)) and the SUM of "
+    "the filtered numeric column (e.g. SUM(Quantity) AS total_quantity). "
+    "Order by occurrence_count DESC so the most frequent items appear first.\n\n"
+    "Also return an answer_template: a 1-2 sentence plain English answer using "
+    "{column_alias} placeholders that exactly match the column aliases in your SQL. "
+    "The template will be filled with actual values from the first result row.\n"
+    "Example — SQL has: SELECT Country, SUM(...) AS total_revenue ...\n"
+    "Template: '{Country} generated the highest revenue at {total_revenue}.'\n"
+    "For list queries (top N): '{first_col} leads with {second_col}.'\n"
+    "Use only aliases that appear in your SELECT — never invent new ones."
 )
 
 
 class _SqlOutput(BaseModel):
     sql: str
+    answer_template: str
 
 
 class SqlGenerationAgent:
@@ -66,7 +86,7 @@ class SqlGenerationAgent:
         question: str,
         profile: DatasetProfile,
         feedback: str | None = None,
-    ) -> str:
+    ) -> tuple[str, str]:  # (sql, answer_template)
         """
         Generate a BigQuery SQL query for the given question.
 
@@ -95,6 +115,7 @@ class SqlGenerationAgent:
             response_mime_type="application/json",
             response_schema=_SqlOutput,
             temperature=0.0,
+            seed=42,
         )
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -111,9 +132,9 @@ class SqlGenerationAgent:
                     "Gemini did not respond within 45 seconds — try again or switch to a faster model"
                 )
 
-        sql = _SqlOutput.model_validate_json(response.text).sql
-        logger.debug("Generated SQL:\n%s", sql)
-        return sql
+        output = _SqlOutput.model_validate_json(response.text)
+        logger.debug("Generated SQL:\n%s", output.sql)
+        return output.sql, output.answer_template
 
     def _build_prompt(
         self, question: str, profile: DatasetProfile, feedback: str | None

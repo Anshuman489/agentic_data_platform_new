@@ -10,9 +10,9 @@ from decimal import Decimal
 from typing import Any
 
 import pandas as pd
+import sqlparse
 import streamlit as st
 
-from agents.answer_agent import AnswerAgent
 from agents.catalog_manager import CatalogManager
 from agents.pipeline import run_pipeline
 from agents.schema_discovery_agent import SchemaDiscoveryAgent
@@ -22,6 +22,7 @@ from agents.validation_agent import ValidationAgent
 from config.settings import settings
 from core.bigquery_client import BigQueryClient
 from core.bq_uploader import upload_file_to_bigquery
+from models.dataset import DatasetProfile
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -44,6 +45,8 @@ _DEFAULTS: dict[str, Any] = {
     "result": None,
     "nl_answer": None,
     "error": None,
+    "profile": None,        # DatasetProfile of the queried table
+    "currency": None,       # detected currency symbol e.g. "£", "$", None
 }
 
 for _k, _v in _DEFAULTS.items():
@@ -66,12 +69,19 @@ def get_sql_agent() -> SqlGenerationAgent:
     return SqlGenerationAgent()
 
 
-@st.cache_resource
-def get_answer_agent() -> AnswerAgent:
-    return AnswerAgent()
-
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _fmt(value) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    if isinstance(value, Decimal):
+        return f"{float(value):,.2f}"
+    if isinstance(value, int):
+        return f"{value:,}"
+    return str(value)
+
 
 def _format_bytes(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -79,6 +89,85 @@ def _format_bytes(n: int) -> str:
             return f"{n:.1f} {unit}"
         n /= 1024
     return f"{n:.1f} PB"
+
+
+# ── Currency detection ─────────────────────────────────────────────────────────
+
+_CURRENCY_SYMBOLS: dict[str, str] = {
+    "USD": "$", "GBP": "£", "EUR": "€", "JPY": "¥",
+    "CAD": "CA$", "AUD": "A$", "CHF": "Fr", "CNY": "¥",
+    "INR": "₹", "MXN": "MX$", "BRL": "R$", "KRW": "₩",
+    "SGD": "S$", "HKD": "HK$", "SEK": "kr", "NOK": "kr",
+}
+
+_MONETARY_KEYWORDS = frozenset({
+    "amount", "price", "revenue", "total", "value", "cost",
+    "fee", "fare", "sales", "income", "spend", "profit",
+    "charge", "earning", "payment", "balance",
+})
+
+
+def _is_monetary_col(col_name: str) -> bool:
+    lower = col_name.lower()
+    return any(kw in lower for kw in _MONETARY_KEYWORDS)
+
+
+def _detect_currency_symbol(rows: list[dict], profile: DatasetProfile) -> str | None:
+    """
+    Return a single currency symbol for the result set, or None if ambiguous/unknown.
+
+    Priority:
+      1. Explicit currency column in result rows (e.g. currency="GBP").
+         If multiple distinct codes appear → None (mixed currencies).
+      2. Currency code in any column description in the profile.
+      3. Currency code in the table description.
+    """
+    if rows:
+        currency_col = next(
+            (k for k in rows[0] if k.lower() in {"currency", "currency_code", "currencycode", "ccy"}),
+            None,
+        )
+        if currency_col:
+            codes = {str(r.get(currency_col, "")).upper() for r in rows if r.get(currency_col)}
+            codes.discard("")
+            if len(codes) == 1:
+                return _CURRENCY_SYMBOLS.get(codes.pop())
+            return None  # mixed currencies — don't apply a single symbol
+
+    for col in profile.columns:
+        if col.description:
+            for code, sym in _CURRENCY_SYMBOLS.items():
+                if code in col.description.upper():
+                    return sym
+
+    if profile.table_description:
+        desc_upper = profile.table_description.upper()
+        hits = [sym for code, sym in _CURRENCY_SYMBOLS.items() if code in desc_upper]
+        if len(hits) == 1:
+            return hits[0]
+
+    return None
+
+
+def _fill_answer(template: str, rows: list[dict], currency: str | None = None) -> str:
+    if not rows or not template:
+        return ""
+    try:
+        formatted = {}
+        for k, v in rows[0].items():
+            if currency and _is_monetary_col(k) and isinstance(v, (int, float, Decimal)):
+                formatted[k] = f"{currency}{_fmt(v)}"
+            else:
+                formatted[k] = _fmt(v)
+        return template.format(**formatted)
+    except (KeyError, ValueError):
+        return template
+
+
+def _normalize_question(q: str) -> str:
+    """Lowercase and strip trailing punctuation so identical questions produce identical prompts."""
+    import re
+    return re.sub(r"[?!.\s]+$", "", q.strip()).lower()
 
 
 def _reset(question: str = "") -> None:
@@ -120,14 +209,14 @@ def _run_pipeline_for(question: str, table_ref: str) -> None:
             st.session_state.stage = "error"
             return
 
+    currency = _detect_currency_symbol(result.rows if result.passed else [], profile)
+
     nl_answer = ""
     if result.passed and result.rows:
-        with st.spinner("Summarising results..."):
-            try:
-                nl_answer = get_answer_agent().run(question, result.rows, result.total_rows)
-            except Exception:
-                pass
+        nl_answer = _fill_answer(result.answer_template, result.rows, currency)
 
+    st.session_state.profile = profile
+    st.session_state.currency = currency
     st.session_state.result = result
     st.session_state.nl_answer = nl_answer
     st.session_state.stage = "result"
@@ -233,11 +322,14 @@ def render_main() -> None:
     with col2:
         ask_clicked = st.button("Ask", type="primary", use_container_width=True)
 
-    # ── Handle Ask — reset immediately then rerun for clean slate ────────────────
     if ask_clicked and question.strip():
-        _reset(question.strip())
+        _reset(_normalize_question(question))
         st.session_state.stage = "routing"
         st.rerun()
+
+    # ── Result placeholder — created before any blocking calls so Streamlit
+    #    clears the previous result immediately when a new query starts.
+    result_area = st.empty()
 
     # ── Routing stage ──────────────────────────────────────────────────────────
     if st.session_state.stage == "routing":
@@ -288,57 +380,69 @@ def render_main() -> None:
                     _run_pipeline_for(st.session_state.question, ref)
                     st.rerun()
 
-    # ── Result ─────────────────────────────────────────────────────────────────
+    # ── Result — rendered into the placeholder so it occupies the same fixed
+    #    position on every rerun and the slot is empty during processing.
     if st.session_state.stage == "result" and st.session_state.result:
-        result = st.session_state.result
-        route = st.session_state.route_info
+        with result_area.container():
+            result = st.session_state.result
+            route = st.session_state.route_info
 
-        # Route badge
-        if route:
-            table_id = st.session_state.selected_table.split(".")[-1]
-            st.caption(
-                f"Queried: **{table_id}** — {route.confidence:.0%} confidence  |  "
-                f"{route.reasoning}"
-            )
+            if route:
+                table_id = st.session_state.selected_table.split(".")[-1]
+                st.caption(
+                    f"Queried: **{table_id}** — {route.confidence:.0%} confidence  |  "
+                    f"{route.reasoning}"
+                )
 
-        st.write("")
+            st.write("")
 
-        # NL answer
-        if st.session_state.nl_answer:
-            st.success(st.session_state.nl_answer)
+            if st.session_state.nl_answer:
+                st.success(st.session_state.nl_answer)
 
-        # Validation pills
-        vcol1, vcol2 = st.columns(2)
-        with vcol1:
-            if result.syntax_valid:
-                st.success("Syntax valid")
-            else:
-                st.error(f"Syntax error: {result.syntax_error}")
-        with vcol2:
-            if result.semantic_valid:
-                st.success("Semantically correct")
-            elif result.semantic_valid is False:
-                st.warning(result.semantic_feedback or "Semantic check failed")
+            vcol1, vcol2 = st.columns(2)
+            with vcol1:
+                if result.syntax_valid:
+                    st.success("Syntax valid")
+                else:
+                    st.error(f"Syntax error: {result.syntax_error}")
+            with vcol2:
+                if result.semantic_valid:
+                    st.success("Semantically correct")
+                elif result.semantic_valid is False:
+                    st.warning(result.semantic_feedback or "Semantic check failed")
 
-        # SQL expander
-        with st.expander("View generated SQL", expanded=False):
-            st.code(result.sql, language="sql")
+            with st.expander("View generated SQL", expanded=False):
+                formatted_sql = sqlparse.format(
+                    result.sql,
+                    reindent=True,
+                    keyword_case="upper",
+                    indent_width=2,
+                )
+                st.code(formatted_sql, language="sql")
 
-        # Results table
-        if result.passed and result.rows:
-            st.subheader(f"Results — {result.total_rows} row(s)")
-            df = _rows_to_df(result.rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        elif result.passed and result.total_rows == 0:
-            st.info("Query returned 0 rows.")
-        elif not result.passed:
-            st.error("Query did not pass validation.")
-            if result.semantic_feedback:
-                st.write(result.semantic_feedback)
+            if result.passed and result.rows:
+                st.subheader(f"Results — {result.total_rows} row(s)")
+                df = _rows_to_df(result.rows)
+                currency = st.session_state.currency
+                col_cfg = {}
+                if currency:
+                    for col in df.columns:
+                        if _is_monetary_col(col) and pd.api.types.is_numeric_dtype(df[col]):
+                            col_cfg[col] = st.column_config.NumberColumn(
+                                col, format=f"{currency}%.2f"
+                            )
+                st.dataframe(df, use_container_width=True, hide_index=True, column_config=col_cfg or None)
+            elif result.passed and result.total_rows == 0:
+                st.info("Query returned 0 rows.")
+            elif not result.passed:
+                st.error("Query did not pass validation.")
+                if result.semantic_feedback:
+                    st.write(result.semantic_feedback)
 
     # ── Error ──────────────────────────────────────────────────────────────────
-    if st.session_state.stage == "error" and st.session_state.error:
-        st.error(f"Something went wrong: {st.session_state.error}")
+    elif st.session_state.stage == "error" and st.session_state.error:
+        with result_area.container():
+            st.error(f"Something went wrong: {st.session_state.error}")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

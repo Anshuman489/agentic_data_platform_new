@@ -47,6 +47,9 @@ class ValidationResult(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list)
     total_rows: int = 0
 
+    # ── NL answer template (from SQL generation) ──────────────────────────────
+    answer_template: str = ""
+
     # ── Derived ───────────────────────────────────────────────────────────────
     @computed_field
     @property

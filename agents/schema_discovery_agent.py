@@ -19,6 +19,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from google import genai
+from google.genai import types
+
 from config.settings import settings
 from core.bigquery_client import BigQueryClient
 from core.dataset_profiler import DatasetProfiler
@@ -84,13 +87,13 @@ class SchemaDiscoveryAgent:
     """
 
     def __init__(self, bq: BigQueryClient) -> None:
-        """
-        Args:
-            bq: An initialised BigQueryClient. Injected so tests can substitute
-                a mock without touching GCP or the filesystem.
-        """
         self._bq = bq
         self._profiler = DatasetProfiler(bq)
+        self._genai = genai.Client(
+            vertexai=True,
+            project=settings.gcp_project,
+            location=settings.vertex_location,
+        )
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -112,6 +115,12 @@ class SchemaDiscoveryAgent:
         if settings.cache_max_age_hours > 0:
             cached = self._load_cache(cache_path)
             if cached is not None:
+                # Backfill description for profiles cached before this feature existed.
+                if not cached.table_description:
+                    logger.info("Backfilling description for cached profile %s", table_ref)
+                    desc = self._generate_description(cached)
+                    cached = cached.model_copy(update={"table_description": desc})
+                    self._write_cache(cache_path, cached)
                 logger.info(
                     "Cache hit: %s (profiled at %s)",
                     table_ref,
@@ -122,9 +131,6 @@ class SchemaDiscoveryAgent:
         # ── Profile ────────────────────────────────────────────────────────────
         logger.info("Cache miss — profiling %s", table_ref)
 
-        # Fetch table-level metadata for row_count, size_bytes, and description.
-        # DatasetProfiler also calls get_table internally for the schema —
-        # two free metadata calls is acceptable to keep the profiler's API clean.
         table = self._bq.get_table(table_ref)
         table_location = table.location or ""
         columns, sample_rows = self._profiler.profile(table_ref, location=table_location)
@@ -142,10 +148,56 @@ class SchemaDiscoveryAgent:
             sample_rows=sample_rows,
         )
 
+        # ── Generate description ───────────────────────────────────────────────
+        if not profile.table_description:
+            profile = profile.model_copy(
+                update={"table_description": self._generate_description(profile)}
+            )
+
         # ── Cache write ────────────────────────────────────────────────────────
         self._write_cache(cache_path, profile)
 
         return profile
+
+    # ── Private: description generation ───────────────────────────────────────
+
+    def _generate_description(self, profile: DatasetProfile) -> str:
+        """
+        Ask Gemini to write a 1-2 sentence business description of the table.
+
+        Called once at registration time (or lazily on first cache hit for older
+        profiles). The description is stored in the cache and fed to the router
+        so it can discriminate between tables with similar column shapes.
+        """
+        col_lines = []
+        for c in profile.columns[:25]:
+            samples = ", ".join(str(v) for v in c.sample_values[:3]) if c.sample_values else "-"
+            col_lines.append(f"  {c.name} ({c.bq_type}, {c.inferred_role}) — e.g. {samples}")
+
+        prompt = (
+            f"Table: {profile.table_ref}\n"
+            f"Row count: {profile.row_count:,}\n"
+            f"Columns:\n" + "\n".join(col_lines) + "\n\n"
+            "Write a 1-2 sentence plain English description of what this table "
+            "contains and what business questions it can answer. Be specific about "
+            "the domain (e.g. 'UK online retail order history', 'credit card "
+            "transaction records', 'NYC taxi trip data'). Mention the key measurable "
+            "columns and dimensions so a routing agent can distinguish this table "
+            "from others with similar column shapes."
+        )
+
+        try:
+            response = self._genai.models.generate_content(
+                model=settings.llm_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.0),
+            )
+            desc = response.text.strip()
+            logger.info("Generated description for %s: %s", profile.table_ref, desc[:120])
+            return desc
+        except Exception as exc:
+            logger.warning("Could not generate description for %s: %s", profile.table_ref, exc)
+            return ""
 
     # ── Private: cache helpers ─────────────────────────────────────────────────
 

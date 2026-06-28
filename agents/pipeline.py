@@ -57,8 +57,9 @@ def run_pipeline(
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         logger.info("Pipeline attempt %d/%d for: %s", attempt, _MAX_ATTEMPTS, question[:80])
 
-        sql = sql_agent.run(question, profile, feedback=feedback)
+        sql, answer_template = sql_agent.run(question, profile, feedback=feedback)
         result = val_agent.run(question, sql, profile)
+        result = result.model_copy(update={"answer_template": answer_template})
 
         if result.passed:
             if attempt > 1:

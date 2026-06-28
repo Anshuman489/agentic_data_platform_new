@@ -36,6 +36,9 @@ dependencies = [
     # pandas + openpyxl — CSV/Excel parsing for dataset upload
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
+
+    # sqlparse — SQL formatter for pretty-printing generated queries in the UI
+    "sqlparse>=0.5.0",
 ]
 
 [tool.setuptools.packages.find]

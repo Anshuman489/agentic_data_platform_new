@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import logging
+import re
 import sys
 from decimal import Decimal
 
@@ -247,6 +248,7 @@ def main() -> None:
 
     # ── --ask (with or without --table) ───────────────────────────────────────
     if args.ask:
+        args.ask = re.sub(r"[?!.\s]+$", "", args.ask.strip()).lower()
         bq = BigQueryClient()
 
         if args.table:

@@ -86,7 +86,7 @@ class ValidationAgent:
             if execution was reached.
         """
         # ── Layer 1: syntax ────────────────────────────────────────────────────
-        syntax_error = self._syntax_check(sql)
+        syntax_error = self._syntax_check(sql, location=profile.location or None)
         if syntax_error:
             logger.warning("Syntax check FAILED: %s", syntax_error[:120])
             return ValidationResult(
@@ -113,7 +113,7 @@ class ValidationAgent:
             )
 
         # ── Execute ────────────────────────────────────────────────────────────
-        rows = self._execute(sql)
+        rows = self._execute(sql, location=profile.location or None)
         logger.info("Query executed — %d rows returned", len(rows))
 
         return ValidationResult(
@@ -127,7 +127,7 @@ class ValidationAgent:
 
     # ── Private: Layer 1 ───────────────────────────────────────────────────────
 
-    def _syntax_check(self, sql: str) -> str | None:
+    def _syntax_check(self, sql: str, location: str | None = None) -> str | None:
         """
         BigQuery dry-run. Returns None when SQL is valid, error string otherwise.
 
@@ -135,7 +135,7 @@ class ValidationAgent:
         table existence — without executing it or scanning any data.
         """
         try:
-            self._bq.run_query(sql, dry_run=True)
+            self._bq.run_query(sql, dry_run=True, location=location)
             return None
         except BadRequest as exc:
             # exc.message contains BQ's structured error (location, reason, etc.)
@@ -199,7 +199,7 @@ class ValidationAgent:
 
     # ── Private: execution ─────────────────────────────────────────────────────
 
-    def _execute(self, sql: str) -> list[dict]:
+    def _execute(self, sql: str, location: str | None = None) -> list[dict]:
         """
         Run the validated SQL and return at most _RESULT_ROW_LIMIT rows.
 
@@ -210,4 +210,4 @@ class ValidationAgent:
         if "LIMIT" not in upper:
             sql = f"{sql}\nLIMIT {_RESULT_ROW_LIMIT}"
 
-        return self._bq.run_query(sql)
+        return self._bq.run_query(sql, location=location)

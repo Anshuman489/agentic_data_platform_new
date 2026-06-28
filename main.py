@@ -2,13 +2,22 @@
 main.py — CLI entry point for the Agentic Data Intelligence Platform.
 
 Usage:
-    # Profile a table (schema discovery):
-    python main.py --table project.dataset.table
+    # Register a table into the catalog (profile + save):
+    python main.py --register project.dataset.table
 
-    # Ask a natural-language question against a table:
+    # List all registered tables:
+    python main.py --list-tables
+
+    # Ask a question — router picks the best table automatically:
+    python main.py --ask "total revenue by country"
+
+    # Ask against a specific table (skips router):
     python main.py --table project.dataset.table --ask "total revenue by country"
 
-    # Show the schema profile even when asking a question:
+    # Profile a table without asking a question:
+    python main.py --table project.dataset.table
+
+    # Show schema profile alongside query results:
     python main.py --table project.dataset.table --ask "..." --profile
 """
 
@@ -22,6 +31,8 @@ from agents.schema_discovery_agent import SchemaDiscoveryAgent
 from agents.sql_generation_agent import SqlGenerationAgent
 from agents.validation_agent import ValidationAgent
 from agents.pipeline import run_pipeline
+from agents.catalog_manager import CatalogManager
+from agents.table_router_agent import TableRouterAgent
 from models.dataset import DatasetProfile
 from models.validation import ValidationResult
 
@@ -136,6 +147,27 @@ def _print_query_result(question: str, result: ValidationResult) -> None:
         print("\n  (query returned 0 rows)")
 
 
+# ── Catalog display ────────────────────────────────────────────────────────────
+
+def _print_catalog(catalog: CatalogManager) -> None:
+    profiles = catalog.list()
+    if not profiles:
+        print("\n  No cached tables found. Run: python main.py --register --table PROJECT.DATASET.TABLE")
+        return
+
+    print(f"\n  {len(profiles)} table(s) available for routing:\n")
+    print(f"  {'TABLE':<55} {'ROWS':>12}  {'COLUMNS':>8}  DATE RANGE")
+    print("  " + "-" * 95)
+    for p in profiles:
+        date_min = next((c.date_min for c in p.columns if c.date_min), None)
+        date_max = next((c.date_max for c in p.columns if c.date_max), None)
+        date_range = f"{date_min} to {date_max}" if date_min else "-"
+        print(
+            f"  {p.table_ref:<55} {p.row_count:>12,}  {len(p.columns):>8}  {date_range}"
+        )
+    print()
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -145,15 +177,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--table",
-        required=True,
+        default=None,
         metavar="PROJECT.DATASET.TABLE",
-        help="Fully-qualified BigQuery table reference.",
+        help="Target table. Required for --register and --profile. Optional for --ask (router picks if omitted).",
+    )
+    parser.add_argument(
+        "--register",
+        action="store_true",
+        help="Profile --table and cache it so it is available for automatic routing.",
+    )
+    parser.add_argument(
+        "--list-tables",
+        action="store_true",
+        help="List all cached tables available for routing.",
     )
     parser.add_argument(
         "--ask",
         default=None,
         metavar="QUESTION",
-        help="Natural-language question to run against the table.",
+        help="Natural-language question. Uses --table if given, else routes automatically.",
     )
     parser.add_argument(
         "--profile",
@@ -166,25 +208,107 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
 
-    # Suppress verbose BQ/Gemini logs when asking a question; keep INFO for profile mode.
     log_level = logging.WARNING if args.ask else logging.INFO
     logging.basicConfig(level=log_level, format="%(levelname)s:%(name)s:%(message)s")
 
-    bq = BigQueryClient()
+    catalog = CatalogManager()
 
-    print(f"\nLoading profile for: {args.table}")
-    try:
-        profile = SchemaDiscoveryAgent(bq).run(args.table)
-    except Exception as exc:
-        logger.error("Failed to profile table '%s': %s", args.table, exc)
-        sys.exit(1)
+    # ── --list-tables ──────────────────────────────────────────────────────────
+    if args.list_tables:
+        _print_catalog(catalog)
+        if not args.ask and not args.register:
+            return
 
-    print(f"  {len(profile.columns)} columns  {profile.row_count:,} rows")
+    # ── --register ─────────────────────────────────────────────────────────────
+    if args.register:
+        if not args.table:
+            print("Error: --register requires --table PROJECT.DATASET.TABLE")
+            sys.exit(1)
 
-    if args.profile or not args.ask:
-        _print_profile(profile)
+        bq = BigQueryClient()
+        print(f"\nProfiling: {args.table}")
+        try:
+            profile = SchemaDiscoveryAgent(bq).run(args.table)
+        except Exception as exc:
+            logger.error("Failed to profile '%s': %s", args.table, exc)
+            sys.exit(1)
 
+        print(f"  Cached  : {profile.table_ref}")
+        print(f"  Columns : {len(profile.columns)}")
+        print(f"  Rows    : {profile.row_count:,}")
+        date_min = next((c.date_min for c in profile.columns if c.date_min), None)
+        date_max = next((c.date_max for c in profile.columns if c.date_max), None)
+        if date_min:
+            print(f"  Dates   : {date_min} to {date_max}")
+        print(f"\n  {catalog.count} table(s) now available for routing.")
+
+        if not args.ask:
+            return
+
+    # ── --ask (with or without --table) ───────────────────────────────────────
     if args.ask:
+        bq = BigQueryClient()
+
+        if args.table:
+            # Explicit table — skip router
+            print(f"\nLoading profile for: {args.table}")
+            try:
+                profile = SchemaDiscoveryAgent(bq).run(args.table)
+            except Exception as exc:
+                logger.error("Failed to profile '%s': %s", args.table, exc)
+                sys.exit(1)
+            print(f"  {len(profile.columns)} columns  {profile.row_count:,} rows")
+        else:
+            # No table specified — route from catalog
+            print(f"\nRouting question to best table...")
+            try:
+                route = TableRouterAgent(catalog).route(args.ask)
+            except Exception as exc:
+                print(f"\nRouting failed: {exc}")
+                sys.exit(1)
+
+            if route.ambiguous:
+                # Build ordered list: winner first, then alternatives
+                candidates = [(route.table_ref, route.confidence, route.reasoning)] + [
+                    (ref, conf, "") for ref, conf in route.alternatives
+                    if conf >= 0.50
+                ]
+
+                print(f"\n  I found {len(candidates)} possible tables for this question:\n")
+                for i, (ref, conf, reason) in enumerate(candidates, 1):
+                    print(f"  [{i}] {ref}  ({conf:.0%})")
+                    if reason:
+                        print(f"      {reason}")
+
+                while True:
+                    try:
+                        raw = input(f"\n  Which table should I query? Enter 1-{len(candidates)}: ").strip()
+                        choice = int(raw)
+                        if 1 <= choice <= len(candidates):
+                            break
+                        print(f"  Please enter a number between 1 and {len(candidates)}.")
+                    except (ValueError, EOFError):
+                        print("  Please enter a valid number.")
+
+                chosen_ref = candidates[choice - 1][0]
+                route = route.model_copy(update={"table_ref": chosen_ref})
+                print()
+            else:
+                print(f"  Selected : {route.table_ref}")
+                print(f"  Confidence: {route.confidence:.0%}")
+                print(f"  Reason   : {route.reasoning}")
+
+            print(f"\nLoading profile for: {route.table_ref}")
+            try:
+                profile = SchemaDiscoveryAgent(bq).run(route.table_ref)
+            except Exception as exc:
+                logger.error("Failed to profile '%s': %s", route.table_ref, exc)
+                sys.exit(1)
+            print(f"  {len(profile.columns)} columns  {profile.row_count:,} rows")
+
+        if args.profile:
+            _print_profile(profile)
+
         try:
             result = run_pipeline(
                 question=args.ask,
@@ -197,6 +321,24 @@ def main() -> None:
             logger.error("Pipeline failed: %s", exc)
             logging.exception("Details:")
             sys.exit(1)
+
+        return
+
+    # ── --table alone (profile mode) ──────────────────────────────────────────
+    if args.table:
+        bq = BigQueryClient()
+        print(f"\nLoading profile for: {args.table}")
+        try:
+            profile = SchemaDiscoveryAgent(bq).run(args.table)
+        except Exception as exc:
+            logger.error("Failed to profile '%s': %s", args.table, exc)
+            sys.exit(1)
+        print(f"  {len(profile.columns)} columns  {profile.row_count:,} rows")
+        _print_profile(profile)
+        return
+
+    # ── No action ─────────────────────────────────────────────────────────────
+    _build_parser().print_help()
 
 
 if __name__ == "__main__":

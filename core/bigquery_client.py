@@ -80,6 +80,7 @@ class BigQueryClient:
         self,
         sql: str,
         dry_run: bool = False,
+        location: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Execute a Standard SQL query and return results as plain Python dicts.
@@ -108,7 +109,7 @@ class BigQueryClient:
             query_job = self._client.query(
                 sql,
                 job_config=job_config,
-                location=self._location,
+                location=location or self._location,
             )
         except GoogleAPIError:
             logger.exception("Failed to submit query to BigQuery")

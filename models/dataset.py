@@ -153,6 +153,12 @@ class DatasetProfile(BaseModel):
     # Used to give the SQL Generation Agent a concrete sense of what the data looks like.
     sample_rows: list[dict] = []
 
+    # BigQuery region where this table lives — e.g. "US", "us-central1", "EU".
+    # Read from table.location during profiling and stored so every downstream
+    # BQ query (dry-run, execution) targets the correct region automatically.
+    # Empty string means "use the default from settings" — handles old cache files.
+    location: str = ""
+
     # UTC timestamp of when this profile was generated.
     # Used by SchemaDiscoveryAgent to decide whether the cached profile is still fresh.
     # default_factory means each new DatasetProfile gets the current time automatically.

@@ -84,6 +84,7 @@ class DatasetProfiler:
     def profile(
         self,
         table_ref: str,
+        location: str | None = None,
     ) -> tuple[list[ColumnProfile], list[dict[str, Any]]]:
         """
         Profile the given table and return per-column metadata and sample rows.
@@ -123,7 +124,7 @@ class DatasetProfiler:
             agg_sql = self._build_stats_query(table_ref, schema)
             if agg_sql:  # empty when all columns are REPEATED or RECORD
                 logger.debug("Running aggregation stats query for %s", table_ref)
-                agg_rows = self._bq.run_query(agg_sql)
+                agg_rows = self._bq.run_query(agg_sql, location=location)
                 if agg_rows:
                     # Aggregation always returns exactly one row.
                     self._apply_stats(columns, agg_rows[0])
@@ -135,7 +136,8 @@ class DatasetProfiler:
             table_ref,
         )
         sample_rows = self._bq.run_query(
-            f"SELECT * FROM `{table_ref}` LIMIT {settings.bq_sample_row_limit}"
+            f"SELECT * FROM `{table_ref}` LIMIT {settings.bq_sample_row_limit}",
+            location=location,
         )
 
         # ── Step 3: derive sample_values and inferred_role (pure Python) ──────

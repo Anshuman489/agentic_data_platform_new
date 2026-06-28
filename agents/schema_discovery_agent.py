@@ -126,7 +126,8 @@ class SchemaDiscoveryAgent:
         # DatasetProfiler also calls get_table internally for the schema —
         # two free metadata calls is acceptable to keep the profiler's API clean.
         table = self._bq.get_table(table_ref)
-        columns, sample_rows = self._profiler.profile(table_ref)
+        table_location = table.location or ""
+        columns, sample_rows = self._profiler.profile(table_ref, location=table_location)
 
         profile = DatasetProfile(
             table_ref=table_ref,
@@ -136,6 +137,7 @@ class SchemaDiscoveryAgent:
             row_count=table.num_rows or 0,
             size_bytes=table.num_bytes or 0,
             table_description=table.description or None,
+            location=table_location,
             columns=columns,
             sample_rows=sample_rows,
         )

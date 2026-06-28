@@ -6,4 +6,4 @@ class RouteResult(BaseModel):
     confidence: float
     reasoning: str
     ambiguous: bool = False
-    alternatives: list[tuple[str, float]] = []
+    alternatives: list[tuple[str, float, str]] = []  # (table_ref, confidence, reasoning)

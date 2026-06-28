@@ -29,6 +29,13 @@ dependencies = [
     # Google Gen AI unified SDK — Gemini models on Vertex AI (Phase 2+)
     # Uses Application Default Credentials — no extra API key required
     "google-genai>=1.0.0",
+
+    # Streamlit — web UI
+    "streamlit>=1.35.0",
+
+    # pandas + openpyxl — CSV/Excel parsing for dataset upload
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
 ]
 
 [tool.setuptools.packages.find]

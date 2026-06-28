@@ -135,7 +135,7 @@ class TableRouterAgent:
             confidence=best.confidence,
             reasoning=best.reasoning,
             ambiguous=ambiguous,
-            alternatives=[(s.table_ref, s.confidence) for s in scores[1:]],
+            alternatives=[(s.table_ref, s.confidence, s.reasoning) for s in scores[1:]],
         )
 
     def _build_prompt(self, question: str, profiles: list[DatasetProfile]) -> str:

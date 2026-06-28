@@ -4,6 +4,9 @@
 # Cache — generated at runtime by schema_discovery_agent.py
 cache/
 
+#data
+data/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,6 +1,7 @@
 gcp-key.json
 # Environment
 .env
+.env.local
 
 # Cache — generated at runtime by schema_discovery_agent.py
 cache/

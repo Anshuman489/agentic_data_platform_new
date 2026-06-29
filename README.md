@@ -207,9 +207,9 @@ All settings are controlled via `.env`. Defaults work out of the box — only `G
 |---|---|---|
 | `GCP_PROJECT` | required | GCP project ID |
 | `GOOGLE_APPLICATION_CREDENTIALS` | required | Path to service account key file |
-| `BQ_LOCATION` | `US` | BigQuery dataset region |
-| `CACHE_MAX_AGE_HOURS` | `24` | Hours before a table profile is refreshed |
-| `LLM_MODEL` | `gemini-2.0-flash-001` | Gemini model used for all AI calls |
+| `BQ_LOCATION` | `us-central1` | BigQuery dataset region |
+| `CACHE_MAX_AGE_HOURS` | `720` | Hours before a table profile is refreshed |
+| `LLM_MODEL` | `gemini-2.5-flash` | Gemini model used for all AI calls |
 | `VERTEX_LOCATION` | `us-central1` | Vertex AI region |
 
 ---

@@ -19,9 +19,45 @@ Ask questions about your data in plain English. The platform finds the right tab
 - Python 3.11 or higher → https://www.python.org/downloads
   - During install on Windows: tick **"Add Python to PATH"**
 - Git → https://git-scm.com/downloads
-- A `gcp-key.json` file (provided separately by the project owner)
+- Two files provided separately by the project owner:
+  - `gcp-key.json` — your GCP service account credentials
+  - `.env.local` — pre-filled app configuration
 
 No Google Cloud account or gcloud CLI required.
+
+---
+
+## Credentials
+
+You will receive two files from the project owner — keep them safe and do not share or commit them.
+
+| File | What it is |
+|---|---|
+| `gcp-key.json` | GCP service account key — authenticates all BigQuery and Gemini calls |
+| `.env.local` | App configuration — pre-filled with the correct project and settings |
+
+Place both files in the **project root folder** (same level as `app.py`).
+
+Then rename `.env.local` to `.env`:
+
+```bash
+# Windows
+ren .env.local .env
+
+# Mac / Linux
+mv .env.local .env
+```
+
+Your folder should look like this:
+
+```
+agentic_data_platform_new/
+├── gcp-key.json        ← credentials file
+├── .env                ← renamed from .env.local
+├── app.py
+├── main.py
+└── ...
+```
 
 ---
 
@@ -60,14 +96,7 @@ pip install -e .
 
 ### 4. Add your credentials
 
-Place the `gcp-key.json` file (provided by the project owner) in the project root folder.
-
-Create a `.env` file in the project root with the following content:
-
-```
-GCP_PROJECT=agentic-data-intelligence-poc
-GOOGLE_APPLICATION_CREDENTIALS=gcp-key.json
-```
+Place `gcp-key.json` and `.env` (renamed from `.env.local`) in the project root as shown in the [Credentials](#credentials) section above.
 
 ---
 
